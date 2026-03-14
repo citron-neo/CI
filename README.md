@@ -1,18 +1,18 @@
 # 🍋 The Official Citron-CI
 
-[![GitHub Downloads](https://img.shields.io/github/downloads/Zephyron-Dev/Citron-CI/total?logo=github&label=GitHub%20Downloads)](https://github.com/Zephyron-Dev/Citron-CI/releases/latest)
-[![Build Citron (Android)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-android.yml/badge.svg)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-android.yml)
-[![Build Citron (Windows)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-windows.yml)
-[![Build Citron (Linux)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-linux.yml/badge.svg)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-linux.yml)
-[![Build Citron (macOS)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Zephyron-Dev/Citron-CI/actions/workflows/build-macos.yml)
+[![GitHub Downloads](https://img.shields.io/github/downloads/citron-neo/CI/total?logo=github&label=GitHub%20Downloads)](https://github.com/citron-neo/CI/releases/latest)
+[![Build Citron (Android)](https://github.com/citron-neo/CI/actions/workflows/build-android.yml/badge.svg)](https://github.com/citron-neo/CI/actions/workflows/build-android.yml)
+[![Build Citron (Windows)](https://github.com/citron-neo/CI/actions/workflows/build-windows.yml/badge.svg)](https://github.com/citron-neo/CI/actions/workflows/build-windows.yml)
+[![Build Citron (Linux)](https://github.com/citron-neo/CI/actions/workflows/build-linux.yml/badge.svg)](https://github.com/citron-neo/CI/actions/workflows/build-linux.yml)
+[![Build Citron (macOS)](https://github.com/citron-neo/CI/actions/workflows/build-macos.yml/badge.svg)](https://github.com/citron-neo/CI/actions/workflows/build-macos.yml)
 
 ## Star History
 
-<a href="https://www.star-history.com/#Zephyron-Dev/Citron-CI&type=date&legend=top-left">
+<a href="https://www.star-history.com/#citron-neo/CI&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Zephyron-Dev/Citron-CI&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Zephyron-Dev/Citron-CI&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Zephyron-Dev/Citron-CI&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=citron-neo/CI&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=citron-neo/CI&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=citron-neo/CI&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -28,21 +28,21 @@ Would you like to submit a compatibility report for the emulator? You can do so 
 
 Direct links for other information you may need can also be found below:
 
-* [Latest Commits Can Be Found Here](https://git.citron-emu.org/Citron/Emulator/commits/branch/main)
+* [Latest Commits Can Be Found Here](https://github.com/citron-neo/emulator/commits/main)
 
-* [Latest Android Nightly Release](https://github.com/Zephyron-Dev/Citron-CI/releases/tag/nightly-android)
+* [Latest Android Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-android)
 
-* [Latest Linux Nightly Release](https://github.com/Zephyron-Dev/Citron-CI/releases/tag/nightly-linux)
+* [Latest Linux Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-linux)
 
-* [Latest Windows Nightly Release](https://github.com/Zephyron-Dev/Citron-CI/releases/tag/nightly-windows)
+* [Latest Windows Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-windows)
 
-* [Latest macOS Nightly Release](https://github.com/Zephyron-Dev/Citron-CI/releases/tag/nightly-macos)
+* [Latest macOS Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-macos)
 
 ---
 
 # READ THIS IF YOU HAVE ISSUES
 
-If you are on wayland (specially GNOME wayland) and get freezes or crashes, you are likely affected by this issue that affects all Qt6 apps: https://github.com/Zephyron-Dev/Citron-CI/issues/50
+If you are on wayland (specially GNOME wayland) and get freezes or crashes, you are likely affected by this issue that affects all Qt6 apps: https://github.com/citron-neo/CI/issues/50
 
 To fix it simply set the env variable `QT_QPA_PLATFORM=xcb`
 
