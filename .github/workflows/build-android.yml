@@ -112,13 +112,13 @@ jobs:
 
             if [ "${{ needs.check-version.outputs.branch_name }}" = "$FEATURE" ]; then
               echo "🌿 Cloning feature branch: ${{ needs.check-version.outputs.branch_name }}"
-              if git clone --recursive -b "$FEATURE" "$REPO_URL" citron_source; then
+              if git clone --recurse-submodules --shallow-submodules --depth 1 -b "$FEATURE" "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."
                 exit 0
               fi
             else
               echo "📦 Cloning main branch"
-              if git clone --recursive "$REPO_URL" citron_source; then
+              if git clone --recurse-submodules --shallow-submodules --depth 1 "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."
                 exit 0
               fi
@@ -135,7 +135,7 @@ jobs:
         working-directory: ./citron_source
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --force
+          git submodule update --init --recursive --depth 1 --force
 
       - name: Get Citron Commit Hash
         id: get_hash
@@ -232,13 +232,13 @@ jobs:
 
             if [ "${{ needs.check-version.outputs.branch_name }}" = "$FEATURE" ]; then
               echo "🌿 Cloning feature branch: ${{ needs.check-version.outputs.branch_name }}"
-              if git clone --recursive -b "$FEATURE" "$REPO_URL" citron_source; then
+              if git clone --recurse-submodules --shallow-submodules --depth 1 -b "$FEATURE" "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."
                 exit 0
               fi
             else
               echo "📦 Cloning main branch"
-              if git clone --recursive "$REPO_URL" citron_source; then
+              if git clone --recurse-submodules --shallow-submodules --depth 1 "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."
                 exit 0
               fi
@@ -255,7 +255,7 @@ jobs:
         working-directory: ./citron_source
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --force
+          git submodule update --init --recursive --depth 1 --force
 
       - name: Get Citron Commit Hash
         id: get_hash
@@ -434,7 +434,8 @@ jobs:
           fi
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then
-            WEBHOOK_URL="https://discord.com/api/webhooks/1428304731809517588/fG7t7MBprKFss5oGcI05DIFM3JdO41Z0juSV_zOfb9K-UTvyI2fd3-Ciwi48npWXYHLb"
+            echo "DISCORD_WEBHOOK is not set; skipping Discord notification."
+            exit 0
           fi
           curl -H "Content-Type: application/json" \
                -d "{\"content\":\"🤖 **New Android Build Available!**\n\n📦 **Version:** \`${{ env.GIT_HASH }}\`\n📅 **Date:** ${{ env.DATE }}\n$BRANCH_EMOJI **Branch:** $BRANCH_DESC$EXPERIMENTAL_FEATURES\n🔗 **Download:** $DOWNLOAD_URL\"}" \

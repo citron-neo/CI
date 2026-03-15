@@ -117,7 +117,7 @@ jobs:
             # 1. CRITICAL: Wipe the directory before every attempt
             rm -rf emulator
 
-            if git clone --recursive "https://github.com/citron-neo/emulator.git" emulator; then
+            if git clone --recurse-submodules --shallow-submodules --depth 1 "https://github.com/citron-neo/emulator.git" emulator; then
               echo "✅ Clone successful on attempt $ATTEMPT."
               exit 0
             fi
@@ -247,7 +247,8 @@ jobs:
           DATE=$(date +'%Y-%m-%d')
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then
-            WEBHOOK_URL="https://discord.com/api/webhooks/1428304731809517588/fG7t7MBprKFss5oGcI05DIFM3JdO41Z0juSV_zOfb9K-UTvyI2fd3-Ciwi48npWXYHLb"
+            echo "DISCORD_WEBHOOK is not set; skipping Discord notification."
+            exit 0
           fi
           curl -H "Content-Type: application/json" \
                -d "{\"content\":\"🐧 **New Linux Build Available!**\n\n📦 **Version:** \`${{ steps.version.outputs.sha }}\`\n📅 **Date:** ${DATE}\n🔗 **Download:** $DOWNLOAD_URL\n\n✨ Includes x86_64, x86_64_v3 & aarch64 builds!\"}" \
