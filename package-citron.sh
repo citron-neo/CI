@@ -9,7 +9,7 @@ if [ -z "$APP_VERSION" ]; then
 fi
 
 # Construct unique names for the AppImage and tarball based on the build matrix.
-OUTNAME_BASE="citron_nightly-${APP_VERSION}-linux-${ARCH}${ARCH_SUFFIX}"
+OUTNAME_BASE="citron_stable-${APP_VERSION}-linux-${ARCH}${ARCH_SUFFIX}"
 export OUTNAME_APPIMAGE="${OUTNAME_BASE}.AppImage"
 export OUTNAME_TAR="${OUTNAME_BASE}.tar.zst"
 
@@ -34,7 +34,7 @@ mkdir -p ./AppDir/usr/share/qt6
 cp -r /usr/share/qt6/translations ./AppDir/usr/share/qt6/
 
 if [ "$DEVEL" = 'true' ]; then
-	sed -i 's|Name=citron|Name=citron nightly|' ./AppDir/*.desktop
+	sed -i 's|Name=citron|Name=citron stable|' ./AppDir/*.desktop
 fi
 
 echo 'SHARUN_ALLOW_SYS_VK_ICD=1' > ./AppDir/.env

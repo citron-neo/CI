@@ -18,7 +18,7 @@
 
 ---
 
-This repository makes Nightly builds for **x86_64** (Standard), **x86_64_v3** (CPU's that are from 2013+) & **aarch64** on Linux, and also Windows, Android & macOS builds! These builds are all produced @ 12 AM UTC every single day.
+This repository makes Stable builds for **x86_64** (Standard), **x86_64_v3** (CPU's that are from 2013+) & **aarch64** on Linux, and also Windows, Android & macOS builds! These builds are all produced @ 12 AM UTC every single day.
 
 Would you like to submit a compatibility report for the emulator? You can do so here:
 
@@ -30,13 +30,13 @@ Direct links for other information you may need can also be found below:
 
 * [Latest Commits Can Be Found Here](https://github.com/citron-neo/emulator/commits/main)
 
-* [Latest Android Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-android)
+* [Latest Android Stable Release](https://github.com/citron-neo/CI/releases/tag/stable-android)
 
-* [Latest Linux Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-linux)
+* [Latest Linux Stable Release](https://github.com/citron-neo/CI/releases/tag/stable-linux)
 
-* [Latest Windows Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-windows)
+* [Latest Windows Stable Release](https://github.com/citron-neo/CI/releases/tag/stable-windows)
 
-* [Latest macOS Nightly Release](https://github.com/citron-neo/CI/releases/tag/nightly-macos)
+* [Latest macOS Stable Release](https://github.com/citron-neo/CI/releases/tag/stable-macos)
 
 ---
 

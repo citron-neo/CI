@@ -1,7 +1,7 @@
 name: Build Citron (macOS)
 
 concurrency:
-  group: build-macos-nightly-${{ github.ref }}
+  group: build-macos-stable-${{ github.ref }}
   cancel-in-progress: true
 
 on:
@@ -36,7 +36,7 @@ jobs:
       - name: Check if release exists
         id: release_check
         run: |
-          if gh release view nightly-macos --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          if gh release view stable-macos --repo "${{ github.repository }}" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
@@ -118,7 +118,7 @@ jobs:
             echo "Warning: FindWrapOpenGL.cmake not found under externals/qt, skipping AGL patch"
           fi
 
-      - name: Get Nightly Version
+      - name: Get Stable Version
         id: version
         working-directory: ./citron
         run: |
@@ -306,14 +306,14 @@ jobs:
 
           # Step 8: Create the final DMG
           echo "Creating final DMG..."
-          DMG_FILENAME="Citron-macOS-nightly-${{ steps.version.outputs.VERSION }}.dmg"
-          hdiutil create -fs HFS+ -srcfolder "$APP_BUNDLE_PATH" -volname "Citron Nightly" "./$DMG_FILENAME"
+          DMG_FILENAME="Citron-macOS-stable-${{ steps.version.outputs.VERSION }}.dmg"
+          hdiutil create -fs HFS+ -srcfolder "$APP_BUNDLE_PATH" -volname "Citron Stable" "./$DMG_FILENAME"
           mv "$DMG_FILENAME" ./dist/
 
       - name: Upload macOS Build
         uses: actions/upload-artifact@v4
         with:
-          name: Citron-macOS-Nightly
+          name: Citron-macOS-Stable
           path: "dist/*.dmg"
 
   release:
@@ -329,16 +329,16 @@ jobs:
         uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Citron-macOS-Nightly
+          name: Citron-macOS-Stable
           path: .
       - name: Get Version from Filename
         run: |
           FILENAME=$(ls *.dmg)
-          VERSION=${FILENAME#Citron-macOS-nightly-}
+          VERSION=${FILENAME#Citron-macOS-stable-}
           VERSION=${VERSION%.dmg}
           echo "APP_VERSION=${VERSION}" >> $GITHUB_ENV
       - name: Delete Previous Release
-        run: gh release delete "nightly-macos" --repo "${{ github.repository }}" --cleanup-tag -y || true
+        run: gh release delete "stable-macos" --repo "${{ github.repository }}" --cleanup-tag -y || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set Build Date
@@ -346,9 +346,9 @@ jobs:
       - name: Release Artifacts
         uses: softprops/action-gh-release@v2
         with:
-          name: "Continuous Build (macOS Nightly: ${{ env.APP_VERSION }})"
-          tag_name: "nightly-macos"
-          prerelease: true
+          name: "Continuous Build (macOS Stable: ${{ env.APP_VERSION }})"
+          tag_name: "stable-macos"
+          prerelease: false
           files: "*.dmg"
           body: |
             **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
@@ -372,7 +372,7 @@ jobs:
       - name: Post to Discord
         if: success()
         run: |
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-macos"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/stable-macos"
           DATE=$(date +'%Y-%m-%d')
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then

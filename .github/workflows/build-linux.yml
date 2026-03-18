@@ -1,7 +1,7 @@
 name: Build Citron (Linux)
 
 concurrency:
-  group: build-nightly-${{ github.ref }}
+  group: build-stable-${{ github.ref }}
   cancel-in-progress: true
 
 on:
@@ -42,7 +42,7 @@ jobs:
       - name: Check if release exists
         id: release_check
         run: |
-          if gh release view nightly-linux --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          if gh release view stable-linux --repo "${{ github.repository }}" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Release exists"
           else
@@ -149,7 +149,7 @@ jobs:
           NPROC_VAL=$(nproc --all)
           JOBS_VAL=$((NPROC_VAL > 4 ? 4 : NPROC_VAL))
           chmod +x ./build-citron.sh
-          JOBS=${JOBS_VAL} DEVEL=true ./build-citron.sh ${{ matrix.build_arg }}
+          JOBS=${JOBS_VAL} DEVEL=false ./build-citron.sh ${{ matrix.build_arg }}
 
       - name: Package AppImage with Correct Name
         working-directory: ./emulator
@@ -158,7 +158,7 @@ jobs:
           export APP_VERSION="${GIT_SHA}"
           export VERSION="${GIT_SHA}"
           export ARCH_SUFFIX="${{ matrix.script_suffix }}"
-          export DEVEL="true"
+          export DEVEL="false"
           chmod +x ./package-citron.sh
           ./package-citron.sh
 
@@ -198,7 +198,7 @@ jobs:
           path: .
 
       - name: Del Previous Release
-        run: gh release delete "nightly-linux" --repo "${GITHUB_REPOSITORY}" --cleanup-tag -y && sleep 5
+        run: gh release delete "stable-linux" --repo "${GITHUB_REPOSITORY}" --cleanup-tag -y && sleep 5
         env:
           GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         continue-on-error: true
@@ -208,9 +208,9 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          name: "Continuous Build (Linux Nightly: ${{ steps.version.outputs.sha }})"
-          tag_name: "nightly-linux"
-          prerelease: true
+          name: "Continuous Build (Linux Stable: ${{ steps.version.outputs.sha }})"
+          tag_name: "stable-linux"
+          prerelease: false
           draft: false
           generate_release_notes: false
           make_latest: false
@@ -243,7 +243,7 @@ jobs:
       - name: Post to Discord
         if: success()
         run: |
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-linux"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/stable-linux"
           DATE=$(date +'%Y-%m-%d')
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then

@@ -1,7 +1,7 @@
 name: Build Citron (Windows)
 
 concurrency:
-  group: build-windows-nightly-${{ github.ref }}
+  group: build-windows-stable-${{ github.ref }}
   cancel-in-progress: true
 
 on:
@@ -36,7 +36,7 @@ jobs:
       - name: Check if release exists
         id: release_check
         run: |
-          if gh release view nightly-windows --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          if gh release view stable-windows --repo "${{ github.repository }}" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
@@ -116,7 +116,7 @@ jobs:
           restore-keys: |
             vcpkg-qt-cache-${{ matrix.arch }}-${{ runner.os }}-${{ hashFiles('citron/vcpkg.json') }}-
 
-      - name: Get Nightly Version
+      - name: Get Stable Version
         id: version
         working-directory: ./citron
         shell: bash
@@ -175,12 +175,12 @@ jobs:
             if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
             Copy-Item $_.FullName $destPath -Force
           }
-          Compress-Archive -Path ".\temp_package\*" -DestinationPath ".\dist\Citron-windows-nightly-${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}.zip"
+          Compress-Archive -Path ".\temp_package\*" -DestinationPath ".\dist\Citron-windows-stable-${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}.zip"
           Remove-Item ".\temp_package" -Recurse -Force
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
         with:
-          name: Citron-Windows-Nightly-${{ matrix.arch }}
+          name: Citron-Windows-Stable-${{ matrix.arch }}
           path: "dist/*.zip"
 
   release:
@@ -195,17 +195,17 @@ jobs:
         uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Citron-Windows-Nightly-x64
+          name: Citron-Windows-Stable-x64
           path: .
       - name: Get Version from Filename
         shell: bash
         run: |
-          FILENAME=$(ls Citron-windows-nightly-*-x64.zip)
-          VERSION=${FILENAME#Citron-windows-nightly-}
+          FILENAME=$(ls Citron-windows-stable-*-x64.zip)
+          VERSION=${FILENAME#Citron-windows-stable-}
           VERSION=${VERSION%-x64.zip}
           echo "APP_VERSION=${VERSION}" >> $GITHUB_ENV
       - name: Delete Previous Release
-        run: gh release delete "nightly-windows" --repo "${{ github.repository }}" --cleanup-tag -y || true
+        run: gh release delete "stable-windows" --repo "${{ github.repository }}" --cleanup-tag -y || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set Build Date
@@ -213,9 +213,9 @@ jobs:
       - name: Release Artifacts
         uses: softprops/action-gh-release@v2
         with:
-          name: "Continuous Build (Windows Nightly: ${{ env.APP_VERSION }})"
-          tag_name: "nightly-windows"
-          prerelease: true
+          name: "Continuous Build (Windows Stable: ${{ env.APP_VERSION }})"
+          tag_name: "stable-windows"
+          prerelease: false
           files: "*.zip"
           body: |
             **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
@@ -241,7 +241,7 @@ jobs:
       - name: Post to Discord
         if: success()
         run: |
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-windows"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/stable-windows"
           DATE=$(date +'%Y-%m-%d')
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then

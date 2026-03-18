@@ -59,7 +59,7 @@ jobs:
       - name: Check if release exists
         id: release_check
         run: |
-          if gh release view nightly-android --repo "${{ github.repository }}" > /dev/null 2>&1; then
+          if gh release view stable-android --repo "${{ github.repository }}" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Release exists"
           else
@@ -186,7 +186,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: citron-android-nightly
+          name: citron-android-stable
           path: citron_source/src/android/app/build/outputs/apk/mainline/release/*.apk
 
   build-android-8elite:
@@ -358,7 +358,7 @@ jobs:
           path: citron_source/src/android/artifacts/*.apk
 
   release-android:
-    name: "Release Android Nightly"
+    name: "Release Android Stable"
     needs: [check-version, build-android, build-android-8elite]
     if: needs.check-version.outputs.should_build == 'true'
     permissions:
@@ -383,17 +383,17 @@ jobs:
           echo "GIT_HASH=${{ needs.build-android.outputs.git_hash }}" >> $GITHUB_ENV
           echo "BRANCH_NAME=${{ needs.check-version.outputs.branch_name }}" >> $GITHUB_ENV
 
-      - name: Delete previous nightly release and tag
-        run: gh release delete "nightly-android" --repo "${{ github.repository }}" --cleanup-tag -y || true
+      - name: Delete previous stable release and tag
+        run: gh release delete "stable-android" --repo "${{ github.repository }}" --cleanup-tag -y || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create new nightly release
+      - name: Create new stable release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Continuous Build: (Android Nightly: ${{ env.GIT_HASH }})"
-          tag_name: "nightly-android"
-          prerelease: true
+          name: "Continuous Build: (Android Stable: ${{ env.GIT_HASH }})"
+          tag_name: "stable-android"
+          prerelease: false
           files: "*.apk"
           body: |
             **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
@@ -422,7 +422,7 @@ jobs:
       - name: Post to Discord
         if: success()
         run: |
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-android"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/stable-android"
           if [ "${{ env.BRANCH_NAME }}" = "feature/android-game-file-extraction" ]; then
             BRANCH_EMOJI="🍋"
             BRANCH_DESC="Game File Extraction"
