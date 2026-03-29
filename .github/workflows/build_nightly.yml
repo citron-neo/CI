@@ -1,0 +1,1089 @@
+name: Build Citron (Nightly)
+
+concurrency:
+  group: build-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+# ---------------------------------------------------------------------------
+# NIGHTLY BUILD - uses -DCITRON_BUILD_TYPE=Nightly for all platforms
+# ---------------------------------------------------------------------------
+
+jobs:
+
+  # ===========================================================================
+  # VERSION CHECK
+  # ===========================================================================
+  check-version:
+    name: Check if new version available
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.compare.outputs.should_build }}
+      new_hash: ${{ steps.upstream.outputs.hash_short }}
+      new_hash_full: ${{ steps.upstream.outputs.hash_full }}
+      branch_name: ${{ steps.branch_check.outputs.branch_name }}
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Check if feature branch exists and get commit hash
+        id: branch_check
+        run: |
+          REPO_URL="https://github.com/citron-neo/emulator.git"
+          FEATURE="NULL"
+
+          if git ls-remote --heads "$REPO_URL" "$FEATURE" | grep -q "$FEATURE"; then
+            BRANCH_NAME="$FEATURE"
+            FULL_HASH=$(git ls-remote "$REPO_URL" "$FEATURE" | cut -f1)
+            echo "✅ Using feature branch: $BRANCH_NAME"
+          else
+            BRANCH_NAME="main"
+            FULL_HASH=$(git ls-remote "$REPO_URL" HEAD | cut -f1)
+            echo "⚠️ Feature branch not found, falling back to: $BRANCH_NAME"
+          fi
+
+          SHORT_HASH=$(echo "$FULL_HASH" | cut -c1-7)
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "hash_short=$SHORT_HASH" >> $GITHUB_OUTPUT
+          echo "hash_full=$FULL_HASH" >> $GITHUB_OUTPUT
+          echo "hash(short): $SHORT_HASH"
+          echo "hash(full):   $FULL_HASH"
+
+      - name: Get upstream commit hash
+        id: upstream
+        run: |
+          echo "hash_short=${{ steps.branch_check.outputs.hash_short }}" >> $GITHUB_OUTPUT
+          echo "hash_full=${{ steps.branch_check.outputs.hash_full }}" >> $GITHUB_OUTPUT
+          echo "Upstream short: ${{ steps.branch_check.outputs.hash_short }}"
+
+      - name: Get last built version
+        id: last_built
+        run: |
+          LAST_HASH=$(cat LATEST_VERSION 2>/dev/null | tr -d '\n' || echo "none")
+          echo "last_hash=$LAST_HASH" >> $GITHUB_OUTPUT
+          echo "Last built hash: $LAST_HASH"
+
+      - name: Check if nightly releases exist
+        id: release_check
+        run: |
+          ANY_EXISTS=false
+          for tag in nightly-android nightly-linux nightly-macos nightly-windows; do
+            if gh release view "$tag" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+              ANY_EXISTS=true
+              echo "Release $tag exists"
+            fi
+          done
+          echo "exists=$ANY_EXISTS" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Compare versions
+        id: compare
+        run: |
+          if [ "${{ steps.upstream.outputs.hash_short }}" != "${{ steps.last_built.outputs.last_hash }}" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "✅ New version detected - will build"
+          elif [ "${{ steps.release_check.outputs.exists }}" != "true" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "✅ No release exists - will build"
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No changes - skipping build"
+          fi
+
+  # ===========================================================================
+  # ANDROID - Standard
+  # ===========================================================================
+  build-android:
+    name: Build Android APK (Standard)
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      git_hash: ${{ steps.get_hash.outputs.git_hash }}
+      branch_name: ${{ needs.check-version.outputs.branch_name }}
+
+    steps:
+      - name: Clone Citron Source Code
+        shell: bash
+        run: |
+          REPO_URL="https://github.com/citron-neo/emulator.git"
+          FEATURE="feature/android-game-file-extraction"
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
+            rm -rf citron_source
+            if [ "${{ needs.check-version.outputs.branch_name }}" = "$FEATURE" ]; then
+              echo "🌿 Cloning feature branch: ${{ needs.check-version.outputs.branch_name }}"
+              if git clone --recursive -b "$FEATURE" "$REPO_URL" citron_source; then
+                echo "✅ Clone successful."; exit 0
+              fi
+            else
+              echo "📦 Cloning main branch"
+              if git clone --recursive "$REPO_URL" citron_source; then
+                echo "✅ Clone successful."; exit 0
+              fi
+            fi
+            echo "⚠️ Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+          echo "❌ Failed to clone after $MAX_ATTEMPTS attempts."
+          exit 1
+
+      - name: Force Update Submodules
+        working-directory: ./citron_source
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+
+      - name: Get Citron Commit Hash
+        id: get_hash
+        working-directory: ./citron_source
+        run: echo "git_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            wget unzip curl git cmake build-essential \
+            pkg-config zip glslang-tools nasm perl \
+            autoconf automake libtool yasm
+
+      - name: Install Android SDK Command-line Tools
+        run: |
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p android-sdk/cmdline-tools
+          mv cmdline-tools android-sdk/cmdline-tools/latest
+
+      - name: Set up Android Environment Variables
+        run: |
+          echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
+          echo "$PWD/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      - name: Accept Android SDK licenses and install NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Build APK with Gradle
+        working-directory: ./citron_source/src/android
+        run: |
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export ANDROID_NDK="$ANDROID_NDK_HOME"
+          chmod +x gradlew
+          ./gradlew assembleMainlineRelease \
+            -Pcmake.args="-DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=OFF -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Nightly"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: citron-android-nightly
+          path: citron_source/src/android/app/build/outputs/apk/mainline/release/*.apk
+
+  # ===========================================================================
+  # ANDROID - Snapdragon 8 Elite
+  # ===========================================================================
+  build-android-8elite:
+    name: Build Android APK (Snapdragon 8 Elite)
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      git_hash: ${{ steps.get_hash.outputs.git_hash }}
+      branch_name: ${{ needs.check-version.outputs.branch_name }}
+
+    env:
+      TARGET: Lyb
+      MODEL: "8 Elite"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: time_macros
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ccache glslang-tools libvulkan-dev python3-requests patch
+
+      - name: Clone Citron Source Code
+        shell: bash
+        run: |
+          REPO_URL="https://github.com/citron-neo/emulator.git"
+          FEATURE="feature/android-game-file-extraction"
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
+            rm -rf citron_source
+            if [ "${{ needs.check-version.outputs.branch_name }}" = "$FEATURE" ]; then
+              echo "🌿 Cloning feature branch: ${{ needs.check-version.outputs.branch_name }}"
+              if git clone --recursive -b "$FEATURE" "$REPO_URL" citron_source; then
+                echo "✅ Clone successful."; exit 0
+              fi
+            else
+              echo "📦 Cloning main branch"
+              if git clone --recursive "$REPO_URL" citron_source; then
+                echo "✅ Clone successful."; exit 0
+              fi
+            fi
+            echo "⚠️ Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+          echo "❌ Failed to clone after $MAX_ATTEMPTS attempts."
+          exit 1
+
+      - name: Force Update Submodules
+        working-directory: ./citron_source
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+
+      - name: Get Citron Commit Hash
+        id: get_hash
+        working-directory: ./citron_source
+        run: echo "git_hash=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Apply All Patches (Snapdragon 8 Elite)
+        working-directory: ./citron_source
+        run: |
+          echo "Applying Snapdragon 8 Elite patches..."
+          sed -i '/if (!handle) {/,/}/c\    if (!handle) {\n        handle = dlopen("libvulkan.so", RTLD_NOW);\n    }' src/android/app/src/main/jni/native.cpp
+          sed -i '/bool IsShaderInt64Supported() const {/a \        const auto driver = GetDriverID();\n        if (driver == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {\n            return false;\n        }' src/video_core/vulkan_common/vulkan_device.h
+          sed -i '/bool IsExtShaderAtomicInt64Supported() const {/a \        const auto driver = GetDriverID();\n        if (driver == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {\n            return false;\n        }' src/video_core/vulkan_common/vulkan_device.h
+          sed -i '/const auto device_id =/d' src/video_core/vulkan_common/vulkan_device.cpp
+          sed -i 's/\bdevice_id\b/properties.properties.deviceID/g' src/video_core/vulkan_common/vulkan_device.cpp
+          sed -i 's/if (is_qualcomm) {/if (driver_id == VK_DRIVER_ID_QUALCOMM_PROPRIETARY) {/' src/video_core/vulkan_common/vulkan_device.cpp
+          echo "All patches applied successfully."
+
+      - name: Setup and Restore Cache
+        uses: actions/cache@v4
+        id: ccache-cache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-android-ccache-${{ env.TARGET }}-${{ github.ref_name }}-${{ hashFiles('citron_source/**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-android-ccache-${{ env.TARGET }}-${{ github.ref_name }}-
+            ${{ runner.os }}-android-ccache-${{ env.TARGET }}-
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            wget unzip curl git cmake build-essential \
+            pkg-config zip glslang-tools nasm perl \
+            autoconf automake libtool yasm
+
+      - name: Install Android SDK Command-line Tools
+        run: |
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p android-sdk/cmdline-tools
+          mv cmdline-tools android-sdk/cmdline-tools/latest
+
+      - name: Set up Android Environment Variables
+        run: |
+          echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
+          echo "$PWD/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      - name: Accept Android SDK licenses and install NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Compile Android APK (Snapdragon 8 Elite)
+        working-directory: ./citron_source/src/android
+        run: |
+          COUNT="$(git -C ../.. rev-list --count HEAD)"
+          APK_NAME="Citron-${COUNT}-Android-${MODEL}-${TARGET}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export ANDROID_NDK="$ANDROID_NDK_HOME"
+          chmod +x ./gradlew
+          ./gradlew assembleMainlineRelease \
+            -Pcmake.args="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_UPDATE_CHECKER=ON -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=OFF -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Nightly"
+          APK_PATH=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::Build failed: No APK file was found."
+            exit 1
+          fi
+          mkdir -p artifacts
+          mv "$APK_PATH" "artifacts/$APK_NAME.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: citron-android-8elite-nightly
+          path: citron_source/src/android/artifacts/*.apk
+
+  # ===========================================================================
+  # LINUX
+  # ===========================================================================
+  build-linux:
+    name: "${{ matrix.name }}"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Citron Build (Normal x86_64)"
+            os: ubuntu-latest
+            artifact_suffix: "_x86_64"
+            script_suffix: ""
+            build_arg: ""
+          - name: "Citron Build (Optimized x86_64)"
+            os: ubuntu-latest
+            artifact_suffix: "_v3"
+            script_suffix: "_v3"
+            build_arg: "v3"
+          - name: "Citron Build (aarch64)"
+            os: ubuntu-24.04-arm
+            artifact_suffix: "_aarch64"
+            script_suffix: ""
+            build_arg: ""
+
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+
+    steps:
+      - name: Install Git
+        run: pacman -Syu --noconfirm --needed git
+
+      - name: Checkout Workflow Scripts
+        uses: actions/checkout@v4
+
+      - name: Clone Citron Source Code
+        shell: bash
+        run: |
+          REPO_URL="https://github.com/citron-neo/emulator.git"
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
+            rm -rf emulator
+            if git clone --recursive "$REPO_URL" emulator; then
+              echo "✅ Clone successful on attempt $ATTEMPT."
+              exit 0
+            fi
+            echo "⚠️ Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+          echo "❌ Failed to clone after $MAX_ATTEMPTS attempts."
+          exit 1
+
+      - name: Prepare Build Environment
+        run: |
+          mv get-dependencies.sh emulator/
+          mv build-citron.sh emulator/
+          mv package-citron.sh emulator/
+
+      - name: Add Git Safe Directory
+        working-directory: ./emulator
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Install dependencies
+        working-directory: ./emulator
+        run: chmod +x ./get-dependencies.sh && ./get-dependencies.sh
+
+      - name: Build Citron from source
+        working-directory: ./emulator
+        run: |
+          NPROC_VAL=$(nproc --all)
+          JOBS_VAL=$((NPROC_VAL > 4 ? 4 : NPROC_VAL))
+          chmod +x ./build-citron.sh
+          JOBS=${JOBS_VAL} DEVEL=false BUILD_TYPE=Nightly ./build-citron.sh ${{ matrix.build_arg }}
+
+      - name: Package AppImage with Correct Name
+        working-directory: ./emulator
+        run: |
+          GIT_SHA=$(git rev-parse --short HEAD)
+          export APP_VERSION="${GIT_SHA}"
+          export VERSION="${GIT_SHA}"
+          export ARCH_SUFFIX="${{ matrix.script_suffix }}"
+          export DEVEL="false"
+          chmod +x ./package-citron.sh
+          ./package-citron.sh
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Artifacts${{ matrix.artifact_suffix }}
+          path: emulator/dist/
+
+  # ===========================================================================
+  # macOS
+  # ===========================================================================
+  build-macos:
+    name: "Citron Build (macOS)"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies via Homebrew
+        run: |
+          brew install ninja boost catch2 cmake enet fmt ffmpeg glslang hidapi libvpx lld llvm nasm nlohmann-json openal-soft sdl2 molten-vk vulkan-headers vulkan-loader webp lz4 zstd openssl@3 pkg-config libusb opus python@3.12
+
+      - name: Clone Citron Source
+        shell: bash
+        run: |
+          git config --global http.version HTTP/1.1
+          git config --global http.userAgent "git/2.39.3 (AppleGit-146)"
+          ATTEMPT=0
+          MAX_ATTEMPTS=10
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
+            rm -rf citron
+            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+              echo "✅ Clone successful on attempt $ATTEMPT."
+              break
+            fi
+            echo "⚠️ Clone failed. Waiting 30 seconds before retry..."
+            sleep 30
+          done
+          if [ ! -d citron ]; then
+            echo "❌ Failed to clone after $MAX_ATTEMPTS attempts."
+            exit 1
+          fi
+
+      - name: Initialize Submodules
+        working-directory: ./citron
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
+
+      - name: Patch AGL in Qt FindWrapOpenGL.cmake
+        working-directory: ./citron
+        run: |
+          set -e
+          QT_OPENGL_CMAKE=$(find externals/qt -type f -path "*/macos/lib/cmake/Qt6/FindWrapOpenGL.cmake" | sort -V | tail -n 1)
+          if [ -n "$QT_OPENGL_CMAKE" ] && [ -f "$QT_OPENGL_CMAKE" ]; then
+            echo "Patching: $QT_OPENGL_CMAKE"
+            awk 'NR>=40 && NR<=46 {if(NR==40) print "          set(__opengl_agl_fw_path \"\")"; next}1' "$QT_OPENGL_CMAKE" > "$QT_OPENGL_CMAKE.tmp" && mv "$QT_OPENGL_CMAKE.tmp" "$QT_OPENGL_CMAKE"
+          else
+            echo "Warning: FindWrapOpenGL.cmake not found under externals/qt, skipping AGL patch"
+          fi
+
+      - name: Get Version
+        id: version
+        working-directory: ./citron
+        run: |
+          git fetch --tags
+          VERSION=$(git rev-parse --short HEAD)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Set up Python 3.12 venv
+        working-directory: ./citron
+        run: |
+          python3.12 -m venv venv
+          source venv/bin/activate
+          pip install jsonschema jinja2
+          echo "VIRTUAL_ENV=$PWD/venv" >> $GITHUB_ENV
+          echo "$PWD/venv/bin" >> $GITHUB_PATH
+
+      - name: Configure CMake
+        working-directory: ./citron
+        run: |
+          OPENAL_DIR="$(brew --prefix openal-soft)"
+          SDL2_DIR="$(brew --prefix sdl2)"
+          cmake -B build -S . -G "Ninja" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_PREFIX_PATH="$OPENAL_DIR;$SDL2_DIR" \
+            -DCITRON_BUILD_TYPE=Nightly \
+            -DCITRON_USE_FASTER_LD=OFF \
+            -DCITRON_USE_BUNDLED_VCPKG=OFF \
+            -DENABLE_QT=ON \
+            -DCITRON_ENABLE_LTO=ON \
+            -DCITRON_TESTS=OFF \
+            -DUSE_DISCORD_PRESENCE=ON \
+            -DENABLE_WEB_SERVICE=ON \
+            -DENABLE_OPENSSL=ON \
+            -DENABLE_SDL2=ON \
+            -DCITRON_USE_EXTERNAL_SDL2=OFF
+
+      - name: Build Citron
+        working-directory: ./citron
+        run: cmake --build build --config Release
+
+      - name: Package macOS Build
+        run: |
+          set -e
+          mkdir -p dist
+          APP_BUNDLE_PATH=$(find citron/build -name "citron.app" | head -n 1)
+          if [ -z "$APP_BUNDLE_PATH" ]; then
+            echo "::error::Could not find citron.app bundle after build!"; exit 1
+          fi
+          echo "Found .app bundle at: $APP_BUNDLE_PATH"
+          QT_MACOS_ROOT=$(find citron/build/externals/qt -maxdepth 3 -type d -path "*/macos" | sort -V | tail -n 1)
+          if [ -z "$QT_MACOS_ROOT" ]; then
+            echo "::error::Could not find Qt macOS root under citron/build/externals/qt"; exit 1
+          fi
+          MACDEPLOYQT_PATH="$QT_MACOS_ROOT/bin/macdeployqt"
+          if [ ! -f "$MACDEPLOYQT_PATH" ]; then MACDEPLOYQT_PATH="$QT_MACOS_ROOT/bin/macdeployqt6"; fi
+          QT_LIB_PATH="$QT_MACOS_ROOT/lib"
+          if [ ! -f "$MACDEPLOYQT_PATH" ]; then
+            echo "::error::Could not find macdeployqt or macdeployqt6 in $QT_MACOS_ROOT/bin"; exit 1
+          fi
+          "$MACDEPLOYQT_PATH" "$APP_BUNDLE_PATH" -libpath="$QT_LIB_PATH" -verbose=1 -always-overwrite
+          FRAMEWORKS_PATH="$APP_BUNDLE_PATH/Contents/Frameworks"
+          VULKAN_ICD_DIR="$APP_BUNDLE_PATH/Contents/Resources/vulkan/icd.d"
+          mkdir -p "$VULKAN_ICD_DIR"
+          cat > "$VULKAN_ICD_DIR/MoltenVK_icd.json" << 'ICDEOF'
+          {
+              "file_format_version": "1.0.0",
+              "ICD": {
+                  "library_path": "../../../Frameworks/libMoltenVK.dylib",
+                  "api_version": "1.4.0",
+                  "is_portability_driver": true
+              }
+          }
+          ICDEOF
+          copy_missing_deps() {
+            find "$FRAMEWORKS_PATH" -name "*.dylib" -type f | while read -r dylib; do
+              otool -L "$dylib" 2>/dev/null | grep -E "^\s+@rpath/" | awk '{print $1}' | sed 's|@rpath/||' | while read -r dep; do
+                if [ ! -f "$FRAMEWORKS_PATH/$dep" ]; then
+                  HOMEBREW_LIB=$(find /opt/homebrew/lib /opt/homebrew/Cellar /usr/local/lib -name "$dep" 2>/dev/null | head -1)
+                  if [ -n "$HOMEBREW_LIB" ] && [ -f "$HOMEBREW_LIB" ]; then
+                    cp "$HOMEBREW_LIB" "$FRAMEWORKS_PATH/"
+                    chmod u+w "$FRAMEWORKS_PATH/$dep"
+                    install_name_tool -id "@rpath/$dep" "$FRAMEWORKS_PATH/$dep" 2>/dev/null || true
+                  fi
+                fi
+              done
+              otool -L "$dylib" 2>/dev/null | grep -E "^\s+(/opt/homebrew|/usr/local)" | awk '{print $1}' | while read -r abs_dep; do
+                dep_name=$(basename "$abs_dep")
+                if [ ! -f "$FRAMEWORKS_PATH/$dep_name" ] && [ -f "$abs_dep" ]; then
+                  cp "$abs_dep" "$FRAMEWORKS_PATH/"
+                  chmod u+w "$FRAMEWORKS_PATH/$dep_name"
+                  install_name_tool -id "@rpath/$dep_name" "$FRAMEWORKS_PATH/$dep_name" 2>/dev/null || true
+                fi
+              done
+            done
+          }
+          for i in 1 2 3 4 5; do copy_missing_deps; done
+          EXECUTABLE_PATH="$APP_BUNDLE_PATH/Contents/MacOS/citron"
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$EXECUTABLE_PATH" 2>/dev/null || true
+          otool -l "$EXECUTABLE_PATH" | grep -A2 LC_RPATH | grep "path " | awk '{print $2}' | while read -r rpath; do
+            case "$rpath" in
+              @executable_path*|@loader_path*|@rpath*) ;;
+              *) install_name_tool -delete_rpath "$rpath" "$EXECUTABLE_PATH" 2>/dev/null || true ;;
+            esac
+          done
+          find "$FRAMEWORKS_PATH" -name "*.dylib" -type f | while read -r dylib; do
+            dylib_name=$(basename "$dylib")
+            install_name_tool -id "@rpath/$dylib_name" "$dylib" 2>/dev/null || true
+            otool -L "$dylib" 2>/dev/null | grep -E "^\s+/" | awk '{print $1}' | while read -r dep; do
+              dep_name=$(basename "$dep")
+              if [ -f "$FRAMEWORKS_PATH/$dep_name" ]; then
+                install_name_tool -change "$dep" "@rpath/$dep_name" "$dylib" 2>/dev/null || true
+              fi
+            done
+            otool -l "$dylib" 2>/dev/null | grep -A2 LC_RPATH | grep "path " | awk '{print $2}' | while read -r rpath; do
+              case "$rpath" in
+                @executable_path*|@loader_path*|@rpath*) ;;
+                *) install_name_tool -delete_rpath "$rpath" "$dylib" 2>/dev/null || true ;;
+              esac
+            done
+            install_name_tool -add_rpath "@loader_path" "$dylib" 2>/dev/null || true
+          done
+          otool -L "$EXECUTABLE_PATH" 2>/dev/null | grep -E "^\s+/" | awk '{print $1}' | while read -r dep; do
+            dep_name=$(basename "$dep")
+            if [ -f "$FRAMEWORKS_PATH/$dep_name" ]; then
+              install_name_tool -change "$dep" "@rpath/$dep_name" "$EXECUTABLE_PATH" 2>/dev/null || true
+            fi
+          done
+          find "$FRAMEWORKS_PATH" -name "*.framework" -type d | while read -r framework_dir; do
+            framework_name=$(basename "$framework_dir" .framework)
+            framework_binary="$framework_dir/Versions/A/$framework_name"
+            [ ! -f "$framework_binary" ] && framework_binary="$framework_dir/$framework_name"
+            [ -f "$framework_binary" ] && install_name_tool -id "@rpath/$framework_name.framework/Versions/A/$framework_name" "$framework_binary" 2>/dev/null || true
+          done
+          chmod -R u+w "$APP_BUNDLE_PATH"
+          codesign --force --deep -s - "$APP_BUNDLE_PATH"
+          DMG_FILENAME="Citron-macOS-nightly-${{ steps.version.outputs.VERSION }}.dmg"
+          hdiutil create -fs HFS+ -srcfolder "$APP_BUNDLE_PATH" -volname "Citron Nightly" "./$DMG_FILENAME"
+          mv "$DMG_FILENAME" ./dist/
+
+      - name: Upload macOS Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citron-macOS-Nightly
+          path: "dist/*.dmg"
+
+  # ===========================================================================
+  # WINDOWS (MinGW)
+  # ===========================================================================
+  build-windows:
+    name: "Citron Build (Windows MinGW - x64)"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-qt6-multimedia
+            mingw-w64-ucrt-x86_64-qt6-translations
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-vulkan-utility-libraries
+            mingw-w64-ucrt-x86_64-vulkan-memory-allocator
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-nlohmann-json
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-zstd
+            mingw-w64-ucrt-x86_64-lz4
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-openal
+            git
+            base-devel
+
+      - name: Clone Citron Source
+        run: |
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning Citron..."
+            rm -rf citron
+            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+              echo "Clone successful on attempt $ATTEMPT."
+              break
+            fi
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Failed after $MAX_ATTEMPTS attempts."; exit 1
+            fi
+            echo "Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+
+      - name: Cache build directory
+        uses: actions/cache@v4
+        id: cache-build
+        with:
+          path: ./citron/build
+          key: mingw-build-${{ runner.os }}-${{ hashFiles('citron/CMakeLists.txt') }}
+          restore-keys: |
+            mingw-build-${{ runner.os }}-
+
+      - name: Get Nightly Version
+        id: version
+        working-directory: ./citron
+        run: |
+          git fetch --tags
+          VERSION=$(git rev-parse --short HEAD)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Configure CMake
+        working-directory: ./citron
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCITRON_USE_BUNDLED_VCPKG=ON \
+            -DCITRON_USE_BUNDLED_QT=OFF \
+            -DCITRON_USE_BUNDLED_FFMPEG=OFF \
+            -DCITRON_USE_EXTERNAL_SDL2=ON \
+            -DCITRON_USE_EXTERNAL_VULKAN_HEADERS=ON \
+            -DCITRON_USE_EXTERNAL_VULKAN_UTILITY_LIBRARIES=ON \
+            -DCITRON_BUILD_TYPE=Nightly \
+            -DCITRON_TESTS=OFF \
+            -DENABLE_QT=ON \
+            -DENABLE_QT6=ON \
+            -DENABLE_SDL2=ON \
+            -DENABLE_WEB_SERVICE=ON \
+            -DENABLE_OPENSSL=ON \
+            -DENABLE_CUBEB=OFF \
+            -DENABLE_OPENAL=ON \
+            -DENABLE_LIBUSB=ON \
+            -DUSE_DISCORD_PRESENCE=OFF \
+            -DCITRON_USE_AUTO_UPDATER=OFF \
+            -DCITRON_USE_PRECOMPILED_HEADERS=ON
+
+      - name: Build Citron
+        working-directory: ./citron
+        run: cmake --build build --config Release -j$(nproc)
+
+      - name: Package Windows Build
+        shell: pwsh
+        run: |
+          mkdir dist
+          mkdir temp_package
+          $binDir = ".\citron\build\bin"
+          if (Test-Path "$binDir\Release") { $binDir = "$binDir\Release" }
+          Get-ChildItem $binDir -Recurse | Where-Object {
+            $_.Extension -ne ".pdb" -and $_.Extension -ne ".a" -and $_.Extension -ne ".o"
+          } | ForEach-Object {
+            $relativePath = $_.FullName.Replace((Resolve-Path $binDir).Path, "").TrimStart('\')
+            $destPath = Join-Path ".\temp_package" $relativePath
+            $destDir = Split-Path $destPath -Parent
+            if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+            Copy-Item $_.FullName $destPath -Force
+          }
+          Compress-Archive -Path ".\temp_package\*" -DestinationPath ".\dist\Citron-windows-nightly-${{ steps.version.outputs.VERSION }}-x64-mingw.zip"
+          Remove-Item ".\temp_package" -Recurse -Force
+
+      - name: Upload Windows Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citron-Windows-Nightly-x64
+          path: "dist/*.zip"
+
+  # ===========================================================================
+  # RELEASE - Android
+  # ===========================================================================
+  release-android:
+    name: "Release Android Nightly"
+    needs: [check-version, build-android, build-android-8elite]
+    if: needs.check-version.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: citron-android-*
+          merge-multiple: true
+          path: .
+
+      - name: Get version info for release name
+        shell: bash
+        run: |
+          echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+          echo "GIT_HASH=${{ needs.build-android.outputs.git_hash }}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${{ needs.check-version.outputs.branch_name }}" >> $GITHUB_ENV
+
+      - name: Delete previous nightly release and tag
+        run: gh release delete "nightly-android" --repo "${{ github.repository }}" --cleanup-tag -y || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create new nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Continuous Build: (Android Nightly: ${{ env.GIT_HASH }})"
+          tag_name: "nightly-android"
+          prerelease: false
+          files: "*.apk"
+          body: |
+            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
+
+            This build is based on the latest Citron emulator source code from the **${{ env.BRANCH_NAME }}** branch.
+
+            **Build Details:**
+            - Platform: Android (arm64-v8a)
+            - Build Type: Nightly with LTO enabled
+            - Date: ${{ env.DATE }}
+            - Branch: ${{ env.BRANCH_NAME }}
+            - Includes: Standard build + Snapdragon 8 Elite build with Qualcomm patches
+
+      - name: Update LATEST_VERSION
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "${{ needs.check-version.outputs.new_hash }}" > LATEST_VERSION
+          git add LATEST_VERSION
+          git commit -m "Update LATEST_VERSION to ${{ needs.check-version.outputs.new_hash }} [skip ci]" || exit 0
+          for i in {1..5}; do
+            git pull --rebase origin main && git push && break || sleep 2
+          done
+
+      - name: Post to Discord
+        if: success()
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-android"
+          if [ "${{ env.BRANCH_NAME }}" = "feature/android-game-file-extraction" ]; then
+            BRANCH_EMOJI="🍋"; BRANCH_DESC="Game File Extraction"
+            EXPERIMENTAL_FEATURES="\n🔬 **New Features:**\n• RomFS dumping support\n• ExeFS dumping support\n• Custom dump location selection"
+          else
+            BRANCH_EMOJI="📦"; BRANCH_DESC="Main Branch"; EXPERIMENTAL_FEATURES=""
+          fi
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
+          if [ -z "$WEBHOOK_URL" ]; then echo "DISCORD_WEBHOOK is not set; skipping."; exit 0; fi
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\":\"🤖 **New Android Nightly Build!**\n\n📦 **Version:** \`${{ env.GIT_HASH }}\`\n📅 **Date:** ${{ env.DATE }}\n$BRANCH_EMOJI **Branch:** $BRANCH_DESC$EXPERIMENTAL_FEATURES\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               "$WEBHOOK_URL"
+
+  # ===========================================================================
+  # RELEASE - Linux
+  # ===========================================================================
+  release-linux:
+    if: ${{ github.ref_name == 'main' }}
+    name: "Release Linux Nightly"
+    needs: [check-version, build-linux]
+    permissions:
+      actions: read
+      security-events: write
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Upstream Repository
+        run: git clone https://github.com/citron-neo/emulator.git upstream_repo
+
+      - name: Set Version
+        id: version
+        working-directory: ./upstream_repo
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Artifacts*
+          merge-multiple: true
+          path: .
+
+      - name: Del Previous Release
+        run: gh release delete "nightly-linux" --repo "${GITHUB_REPOSITORY}" --cleanup-tag -y && sleep 5
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        continue-on-error: true
+
+      - name: Set Build Date
+        run: echo "BUILD_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "Continuous Build (Linux Nightly: ${{ steps.version.outputs.sha }})"
+          tag_name: "nightly-linux"
+          prerelease: false
+          draft: false
+          generate_release_notes: false
+          make_latest: false
+          files: |
+            *.AppImage*
+            *.tar.zst
+          body: |
+            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
+
+            This build is based on the latest Citron emulator source code from the upstream repository.
+
+            **Build Details:**
+            - Platform: Linux (x86_64, x86_64_v3, aarch64)
+            - Format: AppImage + tar.zst packages
+            - Build Type: Nightly with optimizations
+            - Date: ${{ env.BUILD_DATE }}
+
+      - name: Update LATEST_VERSION
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "${{ steps.version.outputs.sha }}" > LATEST_VERSION
+          git add LATEST_VERSION
+          git commit -m "Update LATEST_VERSION to ${{ steps.version.outputs.sha }} [skip ci]" || exit 0
+          for i in {1..5}; do
+            git pull --rebase origin main && git push && break || sleep 2
+          done
+
+      - name: Post to Discord
+        if: success()
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-linux"
+          DATE=$(date +'%Y-%m-%d')
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
+          if [ -z "$WEBHOOK_URL" ]; then echo "DISCORD_WEBHOOK is not set; skipping."; exit 0; fi
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\":\"🐧 **New Linux Nightly Build!**\n\n📦 **Version:** \`${{ steps.version.outputs.sha }}\`\n📅 **Date:** ${DATE}\n🔗 **Download:** $DOWNLOAD_URL\n\n✨ Includes x86_64, x86_64_v3 & aarch64 builds!\"}" \
+               "$WEBHOOK_URL"
+
+  # ===========================================================================
+  # RELEASE - macOS
+  # ===========================================================================
+  release-macos:
+    if: ${{ github.ref_name == 'main' }}
+    name: "Release macOS Nightly"
+    needs: [check-version, build-macos]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Citron-macOS-Nightly
+          path: .
+      - name: Get Version from Filename
+        run: |
+          FILENAME=$(ls *.dmg)
+          VERSION=${FILENAME#Citron-macOS-nightly-}
+          VERSION=${VERSION%.dmg}
+          echo "APP_VERSION=${VERSION}" >> $GITHUB_ENV
+      - name: Delete Previous Release
+        run: gh release delete "nightly-macos" --repo "${{ github.repository }}" --cleanup-tag -y || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set Build Date
+        run: echo "BUILD_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+      - name: Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Continuous Build (macOS Nightly: ${{ env.APP_VERSION }})"
+          tag_name: "nightly-macos"
+          prerelease: false
+          files: "*.dmg"
+          body: |
+            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
+            This build is based on the latest Citron emulator source code from the upstream repository.
+            **Build Details:**
+            - Platform: macOS (Universal)
+            - Build Type: Nightly with Qt6 and LTO
+            - Date: ${{ env.BUILD_DATE }}
+      - name: Update LATEST_VERSION_MACOS
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "${{ env.APP_VERSION }}" > LATEST_VERSION_MACOS
+          git add LATEST_VERSION_MACOS
+          git commit -m "Update LATEST_VERSION_MACOS to ${{ env.APP_VERSION }} [skip ci]" || exit 0
+          for i in {1..5}; do
+            git pull --rebase origin main && git push && break || sleep 2
+          done
+      - name: Post to Discord
+        if: success()
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-macos"
+          DATE=$(date +'%Y-%m-%d')
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
+          if [ -z "$WEBHOOK_URL" ]; then echo "DISCORD_WEBHOOK is not set; skipping."; exit 0; fi
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\":\"🍎 **New macOS Nightly Build!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               "$WEBHOOK_URL"
+
+  # ===========================================================================
+  # RELEASE - Windows
+  # ===========================================================================
+  release-windows:
+    if: ${{ github.ref_name == 'main' }}
+    name: "Release Windows Nightly"
+    needs: [check-version, build-windows]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Citron-Windows-Nightly-x64
+          path: .
+      - name: Get Version from Filename
+        shell: bash
+        run: |
+          FILENAME=$(ls Citron-windows-nightly-*-x64-mingw.zip)
+          VERSION=${FILENAME#Citron-windows-nightly-}
+          VERSION=${VERSION%-x64-mingw.zip}
+          echo "APP_VERSION=${VERSION}" >> $GITHUB_ENV
+      - name: Delete Previous Release
+        run: gh release delete "nightly-windows" --repo "${{ github.repository }}" --cleanup-tag -y || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set Build Date
+        run: echo "BUILD_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+      - name: Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Continuous Build (Windows Nightly: ${{ env.APP_VERSION }})"
+          tag_name: "nightly-windows"
+          prerelease: false
+          files: "*.zip"
+          body: |
+            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
+
+            This build is based on the latest Citron emulator source code from the upstream repository.
+
+            **Build Details:**
+            - Platform: Windows (x64)
+            - Toolchain: MinGW-w64 (MSYS2 UCRT64)
+            - Build Type: Nightly
+            - Date: ${{ env.BUILD_DATE }}
+      - name: Update LATEST_VERSION
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "${{ env.APP_VERSION }}" > LATEST_VERSION
+          git add LATEST_VERSION
+          git commit -m "Update LATEST_VERSION to ${{ env.APP_VERSION }} [skip ci]" || exit 0
+          for i in {1..5}; do
+            git pull --rebase origin main && git push && break || sleep 2
+          done
+      - name: Post to Discord
+        if: success()
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/nightly-windows"
+          DATE=$(date +'%Y-%m-%d')
+          WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
+          if [ -z "$WEBHOOK_URL" ]; then echo "DISCORD_WEBHOOK is not set; skipping."; exit 0; fi
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\":\"🪟 **New Windows Nightly Build!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchain:** MinGW-w64 (UCRT64)\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               "$WEBHOOK_URL"
