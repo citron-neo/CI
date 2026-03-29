@@ -22,7 +22,7 @@ This repository makes Nightly builds for **x86_64** (Standard), **x86_64_v3** (C
 
 Would you like to submit a compatibility report for the emulator? You can do so here:
 
-* [Submit Compatibility Report](https://github.com/CollectingW/Citron-Compatability)
+* [Submit Compatibility Report](https://github.com/citron-neo/Citron-Compatability)
 
 ---
 
