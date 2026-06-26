@@ -20,7 +20,7 @@ jobs:
       - name: Check if feature branch exists and get commit hash
         id: branch_check
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/splaser/emulator.git"
           FEATURE="NULL"
 
           if git ls-remote --heads "$REPO_URL" "$FEATURE" | grep -q "$FEATURE"; then
@@ -95,7 +95,7 @@ jobs:
       - name: Clone Citron Source Code
         shell: bash
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/splaser/emulator.git"
           FEATURE="feature/android-game-file-extraction"
           
           ATTEMPT=0
@@ -215,7 +215,7 @@ jobs:
       - name: Clone Citron Source Code
         shell: bash
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/splaser/emulator.git"
           FEATURE="feature/android-game-file-extraction"
           
           ATTEMPT=0
@@ -394,7 +394,7 @@ jobs:
           prerelease: false
           files: "*.apk"
           body: |
-            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
+            **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/splaser/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
 
             This build is based on the latest Citron emulator source code from the **${{ env.BRANCH_NAME }}** branch.
 
