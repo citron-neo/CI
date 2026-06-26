@@ -135,6 +135,39 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive --force
 
+      - name: Patch Android OpenSSL build
+        working-directory: ./citron_source
+        run: |
+          # Upstream core crypto code links against OpenSSL::Crypto even when the
+          # Android Gradle defaults disable the SSL backend. Build OpenSSL for
+          # Android so CMake can create the imported targets and link core.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def allow_android_openssl(dependencies):
+              for dependency in dependencies:
+                  if (
+                      isinstance(dependency, dict)
+                      and dependency.get("name") == "openssl"
+                      and dependency.get("platform") == "!linux & !osx & !android"
+                  ):
+                      dependency["platform"] = "!linux & !osx"
+
+          manifest = Path("vcpkg.json")
+          data = json.loads(manifest.read_text())
+          allow_android_openssl(data.get("dependencies", []))
+          for feature in data.get("features", {}).values():
+              allow_android_openssl(feature.get("dependencies", []))
+          manifest.write_text(json.dumps(data, indent=2) + "\n")
+
+          gradle = Path("src/android/app/build.gradle.kts")
+          text = gradle.read_text()
+          text = text.replace("-DENABLE_OPENSSL=0", "-DENABLE_OPENSSL=1")
+          text = text.replace("-DENABLE_OPENSSL=OFF", "-DENABLE_OPENSSL=ON")
+          gradle.write_text(text)
+          PY
+
       - name: Get Citron Commit Hash
         id: get_hash
         working-directory: ./citron_source
@@ -179,7 +212,7 @@ jobs:
           export ANDROID_NDK="$ANDROID_NDK_HOME"
           chmod +x gradlew
           ./gradlew assembleMainlineRelease \
-            -Pcmake.args="-DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=OFF -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON"
+            -Pcmake.args="-DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=ON -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Release"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -254,6 +287,39 @@ jobs:
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive --force
+
+      - name: Patch Android OpenSSL build
+        working-directory: ./citron_source
+        run: |
+          # Upstream core crypto code links against OpenSSL::Crypto even when the
+          # Android Gradle defaults disable the SSL backend. Build OpenSSL for
+          # Android so CMake can create the imported targets and link core.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          def allow_android_openssl(dependencies):
+              for dependency in dependencies:
+                  if (
+                      isinstance(dependency, dict)
+                      and dependency.get("name") == "openssl"
+                      and dependency.get("platform") == "!linux & !osx & !android"
+                  ):
+                      dependency["platform"] = "!linux & !osx"
+
+          manifest = Path("vcpkg.json")
+          data = json.loads(manifest.read_text())
+          allow_android_openssl(data.get("dependencies", []))
+          for feature in data.get("features", {}).values():
+              allow_android_openssl(feature.get("dependencies", []))
+          manifest.write_text(json.dumps(data, indent=2) + "\n")
+
+          gradle = Path("src/android/app/build.gradle.kts")
+          text = gradle.read_text()
+          text = text.replace("-DENABLE_OPENSSL=0", "-DENABLE_OPENSSL=1")
+          text = text.replace("-DENABLE_OPENSSL=OFF", "-DENABLE_OPENSSL=ON")
+          gradle.write_text(text)
+          PY
 
       - name: Get Citron Commit Hash
         id: get_hash
@@ -338,7 +404,7 @@ jobs:
           export ANDROID_NDK="$ANDROID_NDK_HOME"
           chmod +x ./gradlew
           ./gradlew assembleMainlineRelease \
-            -Pcmake.args="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_UPDATE_CHECKER=ON -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=OFF -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Release"
+            -Pcmake.args="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_UPDATE_CHECKER=ON -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=ON -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=ON -DCITRON_BUILD_TYPE=Release"
           
           APK_PATH=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
